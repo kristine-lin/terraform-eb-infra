@@ -1,0 +1,65 @@
+name: EB Deployment for Infra and App
+
+on:
+  push:
+    branches: [ "main" ]
+
+env:            
+  AWS_REGION: ap-southeast-1  
+
+jobs:
+  EB-Deployment:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v3
+   
+    - name: Configure AWS credentials
+      uses: aws-actions/configure-aws-credentials@v1
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-region: ${{ env.AWS_REGION }}
+
+    - name: Setup Terraform
+      uses: hashicorp/setup-terraform@v2
+      with:
+        terraform_wrapper: false
+
+    - name: Terraform fmt
+      run: terraform fmt --recursive
+   
+    - name: Terraform Init
+      run: terraform init
+   
+    - name: Terraform Validate
+      run: terraform validate
+
+    - name: Terraform Plan
+      run: terraform plan
+   
+    - name: Terraform Apply
+      run: terraform apply --auto-approve
+
+    
+    - name: Export terraform outputs
+      id: tfout
+      run: |
+        echo "EB_APP=$(terraform output -raw app_name)" >> $GITHUB_OUTPUT
+        echo "EB_ENV=$(terraform output -raw env_name)" >> $GITHUB_OUTPUT
+
+    - name: Generate deployment package
+      working-directory: ./nodejs
+      run: zip -r ../deploy.zip .
+
+    - name: Deploy to EB
+      uses: einaregilsson/beanstalk-deploy@v22
+      with:
+        aws_access_key: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws_secret_key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        application_name: ${{ steps.tfout.outputs.EB_APP }}
+        environment_name: ${{ steps.tfout.outputs.EB_ENV }}
+        version_label: ${{ github.sha }}
+        region: ${{ env.AWS_REGION }}
+        deployment_package: deploy.zip
